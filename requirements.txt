@@ -1,0 +1,47 @@
+# Requirements for Natural Gas Trading System
+
+# Data processing and analysis
+numpy>=1.22.0
+pandas>=1.4.0
+scipy>=1.8.0
+scikit-learn>=1.0.0
+
+# Data visualization
+matplotlib>=3.5.0
+seaborn>=0.11.0
+
+# Financial analysis
+vectorbt>=0.24.0
+yfinance>=0.1.70
+
+# API access
+requests>=2.27.0
+python-dotenv>=0.19.0
+
+# Web scraping
+beautifulsoup4>=4.10.0
+lxml>=4.7.0
+
+# Data storage
+pyarrow>=7.0.0
+
+# API clients
+eia-python>=1.22
+noaa-sdk>=0.1.2
+
+# Testing
+pytest>=7.0.0
+pytest-cov>=3.0.0
+
+# Development tools
+black>=22.1.0
+flake8>=4.0.0
+isort>=5.10.0
+pre-commit>=2.17.0
+
+# Jupyter notebooks
+jupyter>=1.0.0
+ipykernel>=6.9.0
+
+# Airflow (optional, commented out for initial setup)
+# apache-airflow>=2.2.0 

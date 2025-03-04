@@ -1,0 +1,61 @@
+# Natural Gas Trading System Configuration
+
+# Environment Settings
+environment: 'development'  # Options: development, staging, production
+
+# Data Sources
+data_sources:
+  eia:
+    base_url: 'https://api.eia.gov/v2/'
+    series:
+      ng_storage: 'NG.NW2_EPG0_SAX_R48_BCF.W'
+      ng_production: 'NG.N9070US2.M'
+      ng_consumption: 'NG.N3010US2.M'
+  
+  noaa:
+    base_url: 'https://www.ncdc.noaa.gov/cdo-web/api/v2/'
+    datasets:
+      daily_summaries: 'GHCND'
+    locations:
+      - 'CITY:US060013'  # Chicago
+      - 'CITY:US360019'  # New York
+      - 'CITY:US480015'  # Houston
+
+  cme:
+    symbol: 'NG'  # Natural Gas Futures
+    exchange: 'NYMEX'
+
+# Backtesting Settings
+backtesting:
+  default_start_date: '2018-01-01'
+  default_end_date: '2023-12-31'
+  transaction_cost_pct: 0.0005  # 0.05% per trade
+  slippage_pct: 0.0002  # 0.02% slippage
+
+# Strategy Parameters
+strategies:
+  momentum:
+    lookback_periods: [5, 10, 20, 60]
+    volatility_lookback: 20
+  
+  mean_reversion:
+    lookback_periods: [5, 10, 20]
+    z_score_threshold: 2.0
+  
+  fundamental:
+    storage_deviation_weight: 0.4
+    production_weight: 0.3
+    weather_weight: 0.3
+
+# Risk Management
+risk:
+  max_position_size_pct: 0.2  # 20% of portfolio
+  max_drawdown_pct: 0.15  # 15% max drawdown
+  stop_loss_pct: 0.05  # 5% stop loss
+
+# Logging
+logging:
+  level: 'INFO'  # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  log_to_file: true
+  log_file: 'logs/trading_system.log'
+  rotation: '1 day' 
