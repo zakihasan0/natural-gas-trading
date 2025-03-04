@@ -9,10 +9,11 @@ This project implements a sophisticated natural gas trading system that combines
 ### Key Features
 
 - **Data Ingestion**: Automated pipelines for EIA, NOAA, and market data
+- **Feature Engineering**: Weather-based features, storage analysis, and technical indicators
 - **Strategy Development**: Modular alpha, risk, and portfolio construction components
-- **Backtesting**: Vector-based and event-driven backtesting engines
-- **Analytics**: Factor research and performance analysis tools
-- **Live Trading**: Order execution, risk monitoring, and broker integration
+- **Backtesting**: Vector-based backtesting engine with transaction costs and slippage
+- **Analytics**: Performance analysis and strategy comparison tools
+- **Live Trading**: Signal generation, trade recommendations, and position management
 
 ## Getting Started
 
@@ -25,7 +26,7 @@ This project implements a sophisticated natural gas trading system that combines
 
 1. Clone the repository:
    ```
-   git clone [your-repo-url]
+   git clone https://github.com/yourusername/natural-gas-trading.git
    cd natural-gas-trading
    ```
 
@@ -46,93 +47,142 @@ This project implements a sophisticated natural gas trading system that combines
    # Edit credentials.yaml with your API keys
    ```
 
+## API Setup
+
+The system requires the following API keys to function properly:
+
+1. **NOAA API** - For weather data
+   - Register at https://www.ncdc.noaa.gov/cdo-web/token
+   - Add your token to `config/credentials.yaml`
+
+2. **EIA API** - For natural gas storage and price data
+   - Register at https://www.eia.gov/opendata/register.php
+   - Add your key to `config/credentials.yaml`
+
 ## Project Structure
 
 ```
 natural-gas-trading/
-├── .github/workflows/       # CI/CD pipelines
 ├── config/                  # Configuration files
-├── data/                    # Data directories
-├── dags/                    # Airflow DAGs
+│   ├── config.yaml          # System configuration
+│   └── credentials.yaml     # API keys (git-ignored)
+├── data/                    # Data storage
+│   ├── raw/                 # Raw data from APIs
+│   ├── processed/           # Processed datasets
+│   └── signals/             # Generated trading signals
 ├── src/                     # Source code
-│   ├── data_ingestion/      # Data fetchers
-│   ├── data_processing/     # Data cleaning and transformations
-│   ├── analytics/           # Factor research
+│   ├── data_ingestion/      # API connectors and data fetchers
+│   ├── data_processing/     # Cleaning and feature engineering
 │   ├── strategies/          # Trading strategies
-│   ├── backtesting/         # Backtesting engines
-│   ├── live_trading/        # Live trading execution
-│   └── utils/               # Utilities
-├── notebooks/               # Jupyter notebooks
-└── tests/                   # Test suite
+│   ├── backtesting/         # Backtesting framework
+│   ├── live_trading/        # Live trading components
+│   ├── utils/               # Utilities
+│   └── visualization/       # Visualizations and dashboards
+├── notebooks/               # Jupyter notebooks for analysis
+├── tests/                   # Unit and integration tests
+├── logs/                    # System logs
+└── run_trading_system.py    # Main entry point
 ```
 
 ## Usage
 
-### Running Data Pipelines
+### Running Backtests
 
-```python
-# Example code for running a data pipeline
-from src.data_ingestion.eia_fetcher import fetch_eia_data
-
-fetch_eia_data(start_date='2022-01-01', end_date='2022-12-31')
-```
-
-### Running Tests
+To run a backtest of the weather-storage strategy over 2 years:
 
 ```bash
-# Run all tests
-python -m pytest
-
-# Run specific test file
-python -m pytest tests/unit/test_basic.py
-
-# Run tests with coverage report
-python -m pytest --cov=src/ tests/
+python run_trading_system.py --mode backtest --strategy weather --years 2
 ```
 
-### Backtesting a Strategy
+To compare all strategies:
 
-```python
-# Example code for backtesting
-from src.strategies.alpha_model import MomentumModel
-from src.backtesting.vectorbt_runner import backtest_strategy
-
-model = MomentumModel(lookback_period=20)
-results = backtest_strategy(model, start_date='2022-01-01', end_date='2022-12-31')
-results.plot()
+```bash
+python run_trading_system.py --mode backtest --strategy ensemble --years 2
 ```
 
-## Development Status
+To run individual backtests for all strategies with plotting:
 
-This project is currently in active development. The following components have been implemented:
+```bash
+python run_trading_system.py --mode backtest --strategy all --years 2 --plot
+```
 
-- [x] Project structure and environment setup
-- [x] Basic configuration files
-- [x] EIA data fetcher module
-- [x] Logging utilities
-- [x] Unit testing framework
-- [ ] Weather data fetcher
-- [ ] Futures data fetcher
-- [ ] Data processing modules
-- [ ] Strategy implementation
-- [ ] Backtesting engine
-- [ ] Live trading integration
+### Running Live Trading
+
+To generate a single trading signal:
+
+```bash
+python run_trading_system.py --mode live --once
+```
+
+To run the continuous signal generation service (60-minute intervals):
+
+```bash
+python run_trading_system.py --mode live --interval 60
+```
+
+## System Architecture
+
+### Data Pipeline
+
+1. **Data Ingestion**
+   - NOAA weather data fetcher for temperature and precipitation
+   - EIA natural gas storage and pricing data
+   - Integration with market data sources
+
+2. **Feature Engineering**
+   - Weather features: Heating/Cooling Degree Days (HDD/CDD)
+   - Storage deviation from seasonal norms
+   - Price momentum and mean reversion indicators
+   - Cross-asset signals
+
+### Trading Strategies
+
+1. **Weather-Storage Strategy**
+   - Combines temperature anomalies with storage deviations
+   - Seasonal adjustment based on time of year
+   - Momentum overlay for trend confirmation
+
+2. **Momentum Strategy**
+   - Captures medium-term price trends
+   - Volatility-adjusted position sizing
+
+3. **Mean Reversion Strategy**
+   - Identifies overbought/oversold conditions
+   - Statistical significance testing
+
+4. **Fundamental Strategy**
+   - Storage-based signals
+   - Supply/demand imbalance indicators
+   - Seasonal components
+
+### Risk Management
+
+1. **Position Sizing**
+   - Volatility-based sizing
+   - Maximum position limits
+   - Kelly criterion implementation
+
+2. **Stop Loss**
+   - Trailing stops
+   - Volatility-based stops
+   - Time-based exits
+
+### Performance Metrics
+
+- **Return Metrics**: Total return, annualized return
+- **Risk Metrics**: Sharpe ratio, Sortino ratio, max drawdown
+- **Trading Metrics**: Win rate, profit factor, average win/loss
 
 ## Contributing
 
-Contributions are welcome! Please follow these steps:
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b my-new-feature`
-3. Commit your changes: `git commit -am 'Add some feature'`
-4. Push to the branch: `git push origin my-new-feature`
-5. Submit a pull request
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-[Your License] - See the LICENSE file for details.
+This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## Acknowledgments
 
-- Data sources: EIA, NOAA, CME Group
-- Tools: VectorBT, Pandas, Scikit-learn 
+- NOAA for weather data access
+- EIA for natural gas market data
+- CME Group for futures market information 

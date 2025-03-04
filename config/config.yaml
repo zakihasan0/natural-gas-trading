@@ -1,4 +1,4 @@
-# Natural Gas Trading System Configuration
+# Configuration file for Natural Gas Trading System
 
 # Environment Settings
 environment: 'development'  # Options: development, staging, production
@@ -6,31 +6,59 @@ environment: 'development'  # Options: development, staging, production
 # Data Sources
 data_sources:
   eia:
-    base_url: 'https://api.eia.gov/v2/'
+    base_url: "https://api.eia.gov/v2/"
+    natural_gas:
+      prices_url: "natural-gas/pri/sum/data/"
+      storage_url: "natural-gas/stor/wkly/data/"
     series:
       ng_storage: 'NG.NW2_EPG0_SAX_R48_BCF.W'
       ng_production: 'NG.N9070US2.M'
       ng_consumption: 'NG.N3010US2.M'
   
   noaa:
-    base_url: 'https://www.ncdc.noaa.gov/cdo-web/api/v2/'
+    base_url: "https://www.ncdc.noaa.gov/cdo-web/api/v2/"
     datasets:
-      daily_summaries: 'GHCND'
+      daily_summaries: "GHCND"
+      monthly_summaries: "GSOM"
+      normal_daily: "NORMAL_DLY"
     locations:
       - 'CITY:US060013'  # Chicago
       - 'CITY:US360019'  # New York
       - 'CITY:US480015'  # Houston
+    default_station: "USW00094728"  # Central Park, NY
 
   cme:
     symbol: 'NG'  # Natural Gas Futures
     exchange: 'NYMEX'
 
-# Backtesting Settings
+  yahoo_finance:
+    # Alternative to CME for futures data
+    natural_gas_symbol: "NG=F"
+    crude_oil_symbol: "CL=F"
+
+# Data processing settings
+data_processing:
+  default_indicators:
+    - "MA_20"
+    - "MA_50"
+    - "RSI_14"
+    - "MACD"
+    - "Bollinger_Bands"
+  
+  weather_variables:
+    - "TAVG"  # Average Temperature
+    - "TMAX"  # Maximum Temperature
+    - "TMIN"  # Minimum Temperature
+    - "PRCP"  # Precipitation
+    - "SNOW"  # Snowfall
+    - "HTDD"  # Heating Degree Days
+    - "CLDD"  # Cooling Degree Days
+
+# Backtesting settings
 backtesting:
-  default_start_date: '2018-01-01'
-  default_end_date: '2023-12-31'
-  transaction_cost_pct: 0.0005  # 0.05% per trade
-  slippage_pct: 0.0002  # 0.02% slippage
+  default_initial_capital: 1000000.0
+  default_trade_fee: 0.0001
+  default_slippage: 0.0001
 
 # Strategy Parameters
 strategies:
