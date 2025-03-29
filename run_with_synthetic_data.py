@@ -90,43 +90,52 @@ def run_backtest_with_synthetic_data(args):
     Args:
         args: Command line arguments
     """
-    logger.info(f"Starting backtest with synthetic data (years: {args.years}, strategy: {args.strategy})")
-    
-    # Generate synthetic data
-    days = int(args.years * 365)
-    end_date = datetime.now().strftime('%Y-%m-%d')
-    start_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
-    
-    # Check if synthetic data already exists
-    synthetic_data_path = Path(project_root) / 'data' / 'synthetic' / 'synthetic_data.csv'
-    
-    if synthetic_data_path.exists() and not args.regenerate:
-        logger.info(f"Loading existing synthetic data from {synthetic_data_path}")
-        data = pd.read_csv(synthetic_data_path, index_col=0, parse_dates=True)
-        
-        # Filter to desired date range
-        data = data[(data.index >= start_date) & (data.index <= end_date)]
-        
-        logger.info(f"Loaded synthetic data with {len(data)} records from {data.index[0]} to {data.index[-1]}")
+    # Load or generate synthetic data
+    data_path = Path("data/synthetic/synthetic_data.csv")
+    if not data_path.exists() or args.regenerate:
+        logger.info("Generating new synthetic data")
+        data = generate_synthetic_dataset(days_back=int(args.years * 365), save_to_csv=True)
     else:
-        logger.info(f"Generating new synthetic data from {start_date} to {end_date}")
-        data = generate_synthetic_dataset(start_date=start_date, end_date=end_date, save_to_csv=True)
+        logger.info(f"Loading existing synthetic data from {data_path}")
+        data = pd.read_csv(data_path)
+        # Check if 'date' is a column or already the index
+        if 'date' in data.columns:
+            data['date'] = pd.to_datetime(data['date'])
+            data.set_index('date', inplace=True)
+        else:
+            # The index is likely stored as the first column when saved to CSV
+            # Reset the index and set the proper date column
+            data = pd.read_csv(data_path, index_col=0, parse_dates=True)
+            # Ensure the index is a proper datetime
+            if not isinstance(data.index, pd.DatetimeIndex):
+                # If the index wasn't parsed as datetime, manually convert it
+                data.index = pd.to_datetime(data.index)
     
-    # Process the data
-    processed_data = process_synthetic_data(data)
+    # Check if the dates look correct, regenerate if not
+    if data.index[0].year == 1970 or args.regenerate:
+        logger.warning("Date format issue detected. Regenerating synthetic data...")
+        data = generate_synthetic_dataset(days_back=int(args.years * 365), save_to_csv=True)
     
-    if processed_data.empty:
-        logger.error("No data available for backtesting")
-        return
+    logger.info(f"Loaded synthetic data with {len(data)} records from {data.index[0]} to {data.index[-1]}")
     
-    if args.strategy == 'weather':
-        # Run weather strategy backtest
-        strategy = create_weather_storage_strategy()
+    # Process data
+    logger.info(f"Processing synthetic data with {len(data)} records")
+    data = process_synthetic_data(data)
+    logger.info(f"Processed data: {len(data)} records with {len(data.columns)} features")
+    
+    # Initialize models
+    if args.strategy == 'weather' or args.strategy == 'all':
+        logger.info("Initializing WeatherStorage alpha model")
+        alpha_model = create_weather_storage_strategy()
+        
+        # Create risk model
+        from src.risk.risk_model import create_default_risk_model
         risk_model = create_default_risk_model()
         
+        # Run backtest
         backtester = Backtester(
-            data=processed_data,
-            alpha_model=strategy,
+            data=data,
+            alpha_model=alpha_model,
             risk_model=risk_model,
             initial_capital=args.capital,
             transaction_cost=args.cost,
@@ -134,10 +143,23 @@ def run_backtest_with_synthetic_data(args):
         )
         
         results = backtester.run()
-        backtester.plot_results()
         
-        # Print summary
-        print(f"\nWeather-Storage Strategy Performance Summary:")
+        # Print performance summary
+        print("\nPerformance Summary:")
+        print(f"Initial Equity: ${results['initial_equity']:,.2f}")
+        print(f"Final Equity: ${results['final_equity']:,.2f}")
+        print(f"Total Return: {results['total_return']:.2%}")
+        print(f"Annual Return: {results['annual_return']:.2%}")
+        print(f"Sharpe Ratio: {results['sharpe_ratio']:.2f}")
+        print(f"Max Drawdown: {results['max_drawdown']:.2%}")
+        print(f"Number of Trades: {results['num_trades']}")
+        print(f"Win Rate: {results['win_rate']:.2%}")
+        
+        if args.plot:
+            backtester.plot_results()
+        
+        # Print strategy-specific summary
+        print("\nWeather-Storage Strategy Performance Summary:")
         print(f"Total Return: {results['total_return']:.2%}")
         print(f"Annual Return: {results['annual_return']:.2%}")
         print(f"Sharpe Ratio: {results['sharpe_ratio']:.2f}")
@@ -146,84 +168,8 @@ def run_backtest_with_synthetic_data(args):
         print(f"Win Rate: {results['win_rate']:.2%}")
         
     elif args.strategy == 'ensemble':
-        # Run ensemble backtest with multiple strategies
-        strategies = {}
-        
-        # Add default strategies
-        default_models = create_default_models()
-        default_risk = create_default_risk_model()
-        
-        for name, model in default_models.items():
-            strategies[name] = (model, default_risk)
-        
-        # Add weather strategy
-        weather_strategy = create_weather_storage_strategy()
-        strategies['WeatherStorage'] = (weather_strategy, default_risk)
-        
-        # Run multi-strategy backtest
-        multi_backtester = MultiStrategyBacktester(
-            data=processed_data,
-            strategies=strategies,
-            initial_capital=args.capital,
-            transaction_cost=args.cost
-        )
-        
-        results = multi_backtester.run()
-        
-        # Plot results
-        multi_backtester.plot_equity_curves()
-        
-        # Compare metrics
-        comparison = multi_backtester.compare_metrics()
-        print("\nStrategy Comparison:")
-        print(comparison)
-        
-    elif args.strategy == 'all':
-        # Run individual backtests for all strategies
-        strategies = {}
-        
-        # Add default strategies
-        default_models = create_default_models()
-        default_risk = create_default_risk_model()
-        
-        for name, model in default_models.items():
-            strategies[name] = (model, default_risk)
-        
-        # Add weather strategy
-        weather_strategy = create_weather_storage_strategy()
-        strategies['WeatherStorage'] = (weather_strategy, default_risk)
-        
-        # Run backtest for each strategy
-        for name, (strategy, risk_model) in strategies.items():
-            logger.info(f"Running backtest for strategy: {name}")
-            
-            backtester = Backtester(
-                data=processed_data,
-                alpha_model=strategy,
-                risk_model=risk_model,
-                initial_capital=args.capital,
-                transaction_cost=args.cost,
-                price_col='price'
-            )
-            
-            results = backtester.run()
-            
-            # Print summary
-            print(f"\n{name} Strategy Performance Summary:")
-            print(f"Total Return: {results['total_return']:.2%}")
-            print(f"Annual Return: {results['annual_return']:.2%}")
-            print(f"Sharpe Ratio: {results['sharpe_ratio']:.2f}")
-            print(f"Max Drawdown: {results['max_drawdown']:.2%}")
-            print(f"Number of Trades: {results['num_trades']}")
-            print(f"Win Rate: {results['win_rate']:.2%}")
-            
-            # Plot results if requested
-            if args.plot:
-                backtester.plot_results()
-    
-    else:
-        logger.error(f"Unknown strategy: {args.strategy}")
-        return
+        # TODO: Implement ensemble strategy
+        pass
     
     logger.info("Backtest with synthetic data completed")
 

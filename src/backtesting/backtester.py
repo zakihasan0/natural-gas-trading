@@ -18,7 +18,7 @@ from datetime import datetime, timedelta
 # Import utility logger
 from src.utils.logger import get_logger
 from src.strategies.alpha_model import AlphaModel
-from src.strategies.risk_model import RiskModel
+from src.risk.risk_model import RiskModel, create_default_risk_model
 
 # Configure logging
 logger = get_logger(__name__)
@@ -33,7 +33,7 @@ class Backtester:
         self,
         data: pd.DataFrame,
         alpha_model: AlphaModel,
-        risk_model: RiskModel,
+        risk_model: Optional[RiskModel] = None,
         initial_capital: float = 1_000_000.0,
         transaction_cost: float = 0.0001,  # 1 basis point per trade
         slippage: float = 0.0001,  # 1 basis point per trade
@@ -48,7 +48,7 @@ class Backtester:
         Args:
             data: DataFrame with market data (prices, features)
             alpha_model: Alpha model to generate trading signals
-            risk_model: Risk model for position sizing
+            risk_model: Risk model for position sizing (optional, will use default if None)
             initial_capital: Starting capital for the backtest
             transaction_cost: Cost per trade as a fraction of trade value
             slippage: Trading slippage as a fraction of trade value
@@ -59,7 +59,7 @@ class Backtester:
         """
         self.data = data.copy()
         self.alpha_model = alpha_model
-        self.risk_model = risk_model
+        self.risk_model = risk_model if risk_model is not None else create_default_risk_model()
         self.initial_capital = initial_capital
         self.current_capital = initial_capital
         self.transaction_cost = transaction_cost
@@ -96,11 +96,12 @@ class Backtester:
         logger.info(f"Generated alpha signals: {len(alpha_signals[alpha_signals != 0])} active signals")
         
         # Apply risk model for position sizing
-        if hasattr(self.risk_model, 'size_position'):
-            raw_positions = self.risk_model.size_position(alpha_signals, self.data)
-        else:
-            # Basic scaling if risk model doesn't provide sizing
-            raw_positions = alpha_signals * self.leverage_limit
+        raw_positions = pd.Series(0.0, index=self.data.index)
+        for i in range(len(self.data)):
+            today = self.data.index[i]
+            signal = alpha_signals.at[today]
+            position = self.risk_model.size_position(signal, self.data.iloc[:i+1])
+            raw_positions.at[today] = position
             
         logger.info(f"Sized positions based on risk model")
         

@@ -28,136 +28,64 @@ class RiskModel:
     Base risk model for managing position sizes and risk constraints.
     """
     
-    def __init__(
-        self,
-        max_position_size: float = 1.0,
-        max_leverage: float = 1.0,
-        name: str = "DefaultRisk"
-    ):
-        """
-        Initialize the risk model.
-        
-        Args:
-            max_position_size: Maximum allowed position size (0.0 to 1.0)
-            max_leverage: Maximum allowed leverage
-            name: Name of the risk model
-        """
+    def __init__(self, max_position_size: float = 1.0, max_leverage: float = 1.0):
         self.max_position_size = max_position_size
         self.max_leverage = max_leverage
-        self.name = name
-        
-        logger.info(f"Initialized {self.name} risk model with max_position_size={max_position_size}, "
-                   f"max_leverage={max_leverage}")
-    
-    def size_position(self, alpha_signals: pd.Series) -> pd.Series:
-        """
-        Calculate position sizes from alpha signals, applying risk constraints.
-        
-        Args:
-            alpha_signals: Series with alpha signals (-1 to 1)
-        
-        Returns:
-            Series with position sizes scaled by risk constraints
-        """
-        # Simply scale alpha signals by max position size
-        positions = alpha_signals * self.max_position_size
-        
-        logger.info(f"Sized positions with mean={positions.mean():.4f}, std={positions.std():.4f}")
-        return positions
+        self.logger = get_logger(__name__)
+
+    def _get_price_column(self, data: pd.DataFrame) -> str:
+        """Get the appropriate price column name."""
+        if 'close' in data.columns:
+            return 'close'
+        elif 'price' in data.columns:
+            return 'price'
+        else:
+            raise ValueError("No price column ('close' or 'price') found in data")
+
+    def _calculate_returns(self, data: pd.DataFrame) -> pd.Series:
+        """Calculate returns from price data."""
+        price_col = self._get_price_column(data)
+        return data[price_col].pct_change()
+
+    def size_position(self, positions: pd.Series, data: pd.DataFrame) -> pd.Series:
+        """Base position sizing method."""
+        return positions.clip(-self.max_position_size, self.max_position_size)
 
 
-class VolatilityBasedRisk(RiskModel):
+class VolatilityRisk(RiskModel):
     """
     Volatility-based risk model that adjusts position sizes based on recent volatility.
     """
     
-    def __init__(
-        self,
-        target_volatility: float = 0.15,
-        volatility_lookback: int = 20,
-        max_position_size: float = 1.0,
-        max_leverage: float = 1.0,
-        price_col: str = 'close',
-        vol_floor: float = 0.05
-    ):
-        """
-        Initialize the volatility-based risk model.
-        
-        Args:
-            target_volatility: Target annualized portfolio volatility
-            volatility_lookback: Number of periods to use for volatility calculation
-            max_position_size: Maximum allowed position size (0.0 to 1.0)
-            max_leverage: Maximum allowed leverage
-            price_col: Column name for price data
-            vol_floor: Minimum volatility to use (to avoid division by zero)
-        """
-        super().__init__(max_position_size, max_leverage, name=f"VolatilityRisk_{volatility_lookback}")
+    def __init__(self, target_volatility: float = 0.15, lookback: int = 20, **kwargs):
+        super().__init__(**kwargs)
         self.target_volatility = target_volatility
-        self.volatility_lookback = volatility_lookback
-        self.price_col = price_col
-        self.vol_floor = vol_floor
-        
-        logger.info(f"Volatility risk model parameters: target_vol={target_volatility}, "
-                   f"lookback={volatility_lookback}")
-    
-    def calculate_volatility(self, data: pd.DataFrame) -> pd.Series:
-        """
-        Calculate historical volatility from price data.
-        
-        Args:
-            data: DataFrame with market data including price
-        
-        Returns:
-            Series with rolling volatility estimates (annualized)
-        """
-        if self.price_col not in data.columns:
-            logger.error(f"Price column '{self.price_col}' not found in data")
-            return pd.Series(self.vol_floor, index=data.index)
-        
-        # Calculate daily returns
-        returns = data[self.price_col].pct_change()
-        
-        # Calculate rolling volatility (standard deviation of returns)
-        volatility = returns.rolling(window=self.volatility_lookback).std()
-        
-        # Annualize volatility (assuming 252 trading days per year)
-        annualized_volatility = volatility * np.sqrt(252)
-        
-        # Apply a floor to avoid division by zero
-        annualized_volatility = annualized_volatility.clip(lower=self.vol_floor)
-        
-        return annualized_volatility
-    
-    def size_position(self, alpha_signals: pd.Series, data: pd.DataFrame) -> pd.Series:
-        """
-        Calculate position sizes from alpha signals, scaling by volatility.
-        
-        Args:
-            alpha_signals: Series with alpha signals (-1 to 1)
-            data: DataFrame with market data for volatility calculation
-        
-        Returns:
-            Series with position sizes scaled by volatility
-        """
-        # Calculate volatility
-        volatility = self.calculate_volatility(data)
-        
-        # Scale positions inversely with volatility
-        # Higher volatility -> smaller positions
-        vol_scalar = self.target_volatility / volatility
-        
-        # Apply max leverage constraint
-        vol_scalar = vol_scalar.clip(upper=self.max_leverage)
-        
-        # Scale alpha signals by volatility scalar and max position size
-        positions = alpha_signals * vol_scalar * self.max_position_size
-        
-        # Ensure positions are within allowed limits
-        positions = positions.clip(lower=-self.max_position_size, upper=self.max_position_size)
-        
-        logger.info(f"Sized volatility-adjusted positions with mean={positions.mean():.4f}, "
-                   f"std={positions.std():.4f}")
-        return positions
+        self.lookback = lookback
+
+    def size_position(self, positions: pd.Series, data: pd.DataFrame) -> pd.Series:
+        """Size positions based on volatility."""
+        try:
+            # Calculate returns if not in data
+            if 'returns' not in data.columns:
+                returns = self._calculate_returns(data)
+            else:
+                returns = data['returns']
+
+            # Calculate rolling volatility
+            vol = returns.rolling(window=self.lookback).std() * np.sqrt(252)
+            
+            # Scale positions by volatility
+            vol_adj_positions = positions * (self.target_volatility / vol.fillna(self.target_volatility))
+            
+            # Apply base class position limits
+            sized_positions = super().size_position(vol_adj_positions, data)
+            
+            self.logger.info(f"Sized volatility-adjusted positions with mean={sized_positions.mean():.4f}, std={sized_positions.std():.4f}")
+            return sized_positions
+            
+        except Exception as e:
+            self.logger.error(f"Error in volatility-based position sizing: {str(e)}")
+            return positions
 
 
 class StopLossRisk(RiskModel):
@@ -165,135 +93,40 @@ class StopLossRisk(RiskModel):
     Risk model that applies stop-loss and take-profit rules to positions.
     """
     
-    def __init__(
-        self,
-        stop_loss_pct: float = 0.05,
-        take_profit_pct: float = 0.10,
-        max_position_size: float = 1.0,
-        max_leverage: float = 1.0,
-        price_col: str = 'close'
-    ):
-        """
-        Initialize the stop-loss risk model.
-        
-        Args:
-            stop_loss_pct: Stop loss percentage (e.g., 0.05 = 5% loss)
-            take_profit_pct: Take profit percentage (e.g., 0.10 = 10% gain)
-            max_position_size: Maximum allowed position size (0.0 to 1.0)
-            max_leverage: Maximum allowed leverage
-            price_col: Column name for price data
-        """
-        super().__init__(max_position_size, max_leverage, name="StopLossRisk")
-        self.stop_loss_pct = stop_loss_pct
-        self.take_profit_pct = take_profit_pct
-        self.price_col = price_col
-        
-        # State tracking
-        self.entry_prices = {}  # Map from date to entry price
-        self.active_positions = {}  # Map from date to position size
-        
-        logger.info(f"Stop loss risk model parameters: stop_loss={stop_loss_pct}, "
-                   f"take_profit={take_profit_pct}")
-    
-    def apply_stop_loss(
-        self,
-        positions: pd.Series,
-        data: pd.DataFrame
-    ) -> pd.Series:
-        """
-        Apply stop-loss and take-profit rules to positions.
-        
-        Args:
-            positions: Series with position sizes
-            data: DataFrame with market data including price
-        
-        Returns:
-            Series with adjusted position sizes after applying stop-loss rules
-        """
-        if self.price_col not in data.columns:
-            logger.error(f"Price column '{self.price_col}' not found in data")
+    def __init__(self, stop_loss: float = 0.05, take_profit: float = 0.10, **kwargs):
+        super().__init__(**kwargs)
+        self.stop_loss = stop_loss
+        self.take_profit = take_profit
+
+    def size_position(self, positions: pd.Series, data: pd.DataFrame) -> pd.Series:
+        """Apply stop loss and take profit to positions."""
+        try:
+            # Calculate returns if not in data
+            if 'returns' not in data.columns:
+                returns = self._calculate_returns(data)
+            else:
+                returns = data['returns']
+
+            # Calculate cumulative returns for each position
+            cum_returns = returns.cumsum()
+            
+            # Apply stop loss and take profit
+            stop_loss_mask = cum_returns < -self.stop_loss
+            take_profit_mask = cum_returns > self.take_profit
+            
+            # Zero out positions that hit stops
+            positions = positions.copy()
+            positions[stop_loss_mask | take_profit_mask] = 0
+            
+            # Apply base class position limits
+            sized_positions = super().size_position(positions, data)
+            
+            self.logger.info(f"Sized stop-loss adjusted positions with mean={sized_positions.mean():.4f}, std={sized_positions.std():.4f}")
+            return sized_positions
+            
+        except Exception as e:
+            self.logger.error(f"Error in stop-loss position sizing: {str(e)}")
             return positions
-        
-        # Get price data
-        prices = data[self.price_col]
-        
-        # Create copy of positions to modify
-        adjusted_positions = positions.copy()
-        
-        # Apply stop-loss and take-profit rules iteratively
-        for i, date in enumerate(adjusted_positions.index):
-            if i == 0:
-                # First day, just record the position and entry price
-                if adjusted_positions.iloc[0] != 0:
-                    self.entry_prices[date] = prices.iloc[0]
-                    self.active_positions[date] = adjusted_positions.iloc[0]
-                continue
-            
-            current_price = prices.iloc[i]
-            current_position = adjusted_positions.iloc[i]
-            
-            # Check if position changed (new trade)
-            if i > 0 and current_position != adjusted_positions.iloc[i-1]:
-                # Record new entry price
-                if current_position != 0:
-                    self.entry_prices[date] = current_price
-                    self.active_positions[date] = current_position
-            
-            # Get the most recent entry price and active position
-            if self.active_positions:
-                entry_date = max(d for d in self.active_positions.keys() if d <= date)
-                active_position = self.active_positions[entry_date]
-                entry_price = self.entry_prices[entry_date]
-                
-                # Calculate price change since entry
-                price_change_pct = (current_price - entry_price) / entry_price
-                
-                # Apply stop-loss for long positions
-                if active_position > 0 and price_change_pct < -self.stop_loss_pct:
-                    logger.info(f"Stop loss triggered on {date}: price_change={price_change_pct:.4f}")
-                    adjusted_positions.loc[date] = 0
-                    self.active_positions[date] = 0
-                
-                # Apply stop-loss for short positions
-                elif active_position < 0 and price_change_pct > self.stop_loss_pct:
-                    logger.info(f"Stop loss triggered on {date}: price_change={price_change_pct:.4f}")
-                    adjusted_positions.loc[date] = 0
-                    self.active_positions[date] = 0
-                
-                # Apply take-profit for long positions
-                elif active_position > 0 and price_change_pct > self.take_profit_pct:
-                    logger.info(f"Take profit triggered on {date}: price_change={price_change_pct:.4f}")
-                    adjusted_positions.loc[date] = 0
-                    self.active_positions[date] = 0
-                
-                # Apply take-profit for short positions
-                elif active_position < 0 and price_change_pct < -self.take_profit_pct:
-                    logger.info(f"Take profit triggered on {date}: price_change={price_change_pct:.4f}")
-                    adjusted_positions.loc[date] = 0
-                    self.active_positions[date] = 0
-        
-        return adjusted_positions
-    
-    def size_position(self, alpha_signals: pd.Series, data: pd.DataFrame) -> pd.Series:
-        """
-        Calculate position sizes from alpha signals, applying stop-loss rules.
-        
-        Args:
-            alpha_signals: Series with alpha signals (-1 to 1)
-            data: DataFrame with market data for stop-loss calculation
-        
-        Returns:
-            Series with position sizes after applying stop-loss rules
-        """
-        # First, apply basic position sizing
-        positions = super().size_position(alpha_signals)
-        
-        # Then apply stop-loss rules
-        adjusted_positions = self.apply_stop_loss(positions, data)
-        
-        logger.info(f"Sized stop-loss adjusted positions with mean={adjusted_positions.mean():.4f}, "
-                   f"std={adjusted_positions.std():.4f}")
-        return adjusted_positions
 
 
 class DrawdownControlRisk(RiskModel):
@@ -301,163 +134,74 @@ class DrawdownControlRisk(RiskModel):
     Risk model that dynamically adjusts position sizes based on recent drawdowns.
     """
     
-    def __init__(
-        self,
-        max_drawdown: float = 0.15,
-        scaling_factor: float = 2.0,
-        lookback_window: int = 60,
-        max_position_size: float = 1.0,
-        max_leverage: float = 1.0
-    ):
-        """
-        Initialize the drawdown control risk model.
-        
-        Args:
-            max_drawdown: Maximum allowed drawdown (e.g., 0.15 = 15% drawdown)
-            scaling_factor: How quickly to reduce positions as drawdown approaches max
-            lookback_window: Number of periods to use for drawdown calculation
-            max_position_size: Maximum allowed position size (0.0 to 1.0)
-            max_leverage: Maximum allowed leverage
-        """
-        super().__init__(max_position_size, max_leverage, name="DrawdownControlRisk")
+    def __init__(self, max_drawdown: float = 0.15, scaling_factor: float = 2.0, lookback_window: int = 60, **kwargs):
+        super().__init__(**kwargs)
         self.max_drawdown = max_drawdown
         self.scaling_factor = scaling_factor
         self.lookback_window = lookback_window
-        
-        logger.info(f"Drawdown control risk model parameters: max_drawdown={max_drawdown}, "
-                   f"scaling_factor={scaling_factor}, lookback_window={lookback_window}")
-    
-    def calculate_drawdown(self, returns: pd.Series) -> pd.Series:
-        """
-        Calculate running drawdown from returns series.
-        
-        Args:
-            returns: Series with daily returns
-        
-        Returns:
-            Series with drawdowns
-        """
-        # Calculate cumulative returns
-        cum_returns = (1 + returns).cumprod()
-        
-        # Calculate running maximum
-        running_max = cum_returns.expanding().max()
-        
-        # Calculate drawdown
-        drawdown = (cum_returns / running_max) - 1
-        
-        return drawdown
-    
-    def calculate_position_scalar(self, drawdown: pd.Series) -> pd.Series:
-        """
-        Calculate position scaling factor based on drawdown.
-        
-        Args:
-            drawdown: Series with drawdowns
-        
-        Returns:
-            Series with position scaling factors
-        """
-        # Calculate how close we are to max drawdown (0 = no drawdown, 1 = at max drawdown)
-        # Note: drawdown is negative, so we use abs
-        drawdown_ratio = abs(drawdown) / self.max_drawdown
-        
-        # Calculate scaling factor (exponential decay as we approach max drawdown)
-        # When drawdown_ratio = 0, scalar = 1
-        # When drawdown_ratio = 1, scalar = exp(-scaling_factor)
-        scalar = np.exp(-self.scaling_factor * drawdown_ratio)
-        
-        return scalar
-    
-    def size_position(self, alpha_signals: pd.Series, returns: pd.Series) -> pd.Series:
-        """
-        Calculate position sizes from alpha signals, scaling by drawdown.
-        
-        Args:
-            alpha_signals: Series with alpha signals (-1 to 1)
-            returns: Series with daily returns for drawdown calculation
-        
-        Returns:
-            Series with position sizes scaled by drawdown
-        """
-        # Check if indexes match
-        if not alpha_signals.index.equals(returns.index):
-            logger.warning("Alpha signals and returns indexes don't match, reindexing returns")
-            returns = returns.reindex(alpha_signals.index)
-        
-        # Calculate drawdown
-        drawdown = self.calculate_drawdown(returns)
-        
-        # Calculate position scaling factor
-        position_scalar = self.calculate_position_scalar(drawdown)
-        
-        # Scale alpha signals by position scalar and max position size
-        positions = alpha_signals * position_scalar * self.max_position_size
-        
-        logger.info(f"Sized drawdown-adjusted positions with mean={positions.mean():.4f}, "
-                   f"std={positions.std():.4f}")
-        return positions
+
+    def size_position(self, positions: pd.Series, data: pd.DataFrame) -> pd.Series:
+        """Size positions based on drawdown control."""
+        try:
+            # Calculate returns if not in data
+            if 'returns' not in data.columns:
+                returns = self._calculate_returns(data)
+            else:
+                returns = data['returns']
+
+            # Calculate rolling drawdown
+            cum_returns = (1 + returns).cumprod()
+            rolling_max = cum_returns.rolling(window=self.lookback_window, min_periods=1).max()
+            drawdown = (cum_returns - rolling_max) / rolling_max
+            
+            # Scale positions based on drawdown
+            scale = 1 - (abs(drawdown) / self.max_drawdown) * self.scaling_factor
+            scale = scale.clip(0, 1)
+            
+            # Apply scaling to positions
+            scaled_positions = positions * scale
+            
+            # Apply base class position limits
+            sized_positions = super().size_position(scaled_positions, data)
+            
+            self.logger.info(f"Sized drawdown-controlled positions with mean={sized_positions.mean():.4f}, std={sized_positions.std():.4f}")
+            return sized_positions
+            
+        except Exception as e:
+            self.logger.error(f"Error in drawdown control position sizing: {str(e)}")
+            return positions
 
 
-class CompositeRiskModel(RiskModel):
+class CompositeRisk(RiskModel):
     """
     Composite risk model that combines multiple risk models.
     """
     
-    def __init__(
-        self,
-        risk_models: List[RiskModel],
-        max_position_size: float = 1.0,
-        max_leverage: float = 1.0
-    ):
-        """
-        Initialize the composite risk model.
-        
-        Args:
-            risk_models: List of risk models to combine
-            max_position_size: Maximum allowed position size (0.0 to 1.0)
-            max_leverage: Maximum allowed leverage
-        """
-        model_names = [model.name for model in risk_models]
-        super().__init__(max_position_size, max_leverage, name=f"CompositeRisk_{'+'.join(model_names)}")
-        
+    def __init__(self, risk_models: List[RiskModel], **kwargs):
+        super().__init__(**kwargs)
         self.risk_models = risk_models
-        
-        logger.info(f"Composite risk model initialized with {len(risk_models)} models: {model_names}")
-    
-    def size_position(self, alpha_signals: pd.Series, data: Optional[pd.DataFrame] = None,
-                     returns: Optional[pd.Series] = None) -> pd.Series:
-        """
-        Calculate position sizes from alpha signals, applying all risk models.
-        
-        Args:
-            alpha_signals: Series with alpha signals (-1 to 1)
-            data: DataFrame with market data (for volatility and stop-loss calculation)
-            returns: Series with daily returns (for drawdown calculation)
-        
-        Returns:
-            Series with position sizes after applying all risk models
-        """
-        # Start with full positions based on alpha signals
-        positions = alpha_signals.copy()
-        
-        # Apply each risk model in sequence
-        for model in self.risk_models:
-            if isinstance(model, VolatilityBasedRisk) and data is not None:
+        self.name = "CompositeRisk_" + "+".join([model.__class__.__name__ for model in risk_models])
+        self.logger.info(f"Initialized {self.name} risk model with max_position_size={self.max_position_size}, max_leverage={self.max_leverage}")
+        self.logger.info(f"Composite risk model initialized with {len(risk_models)} models: {[model.__class__.__name__ for model in risk_models]}")
+
+    def size_position(self, positions: pd.Series, data: pd.DataFrame) -> pd.Series:
+        """Apply all risk models in sequence."""
+        try:
+            # Calculate returns if not in data
+            if 'returns' not in data.columns:
+                data = data.copy()
+                data['returns'] = self._calculate_returns(data)
+
+            # Apply each risk model in sequence
+            for model in self.risk_models:
                 positions = model.size_position(positions, data)
-            elif isinstance(model, StopLossRisk) and data is not None:
-                positions = model.size_position(positions, data)
-            elif isinstance(model, DrawdownControlRisk) and returns is not None:
-                positions = model.size_position(positions, returns)
-            else:
-                positions = model.size_position(positions)
-        
-        # Ensure final positions are within allowed limits
-        positions = positions.clip(lower=-self.max_position_size, upper=self.max_position_size)
-        
-        logger.info(f"Sized composite risk-adjusted positions with mean={positions.mean():.4f}, "
-                   f"std={positions.std():.4f}")
-        return positions
+            
+            # Apply final base class position limits
+            return super().size_position(positions, data)
+            
+        except Exception as e:
+            self.logger.error(f"Error in composite position sizing: {str(e)}")
+            return positions
 
 
 def create_default_risk_model(config: Optional[Dict] = None) -> RiskModel:
@@ -489,16 +233,16 @@ def create_default_risk_model(config: Optional[Dict] = None) -> RiskModel:
         max_drawdown = risk_config.get('max_drawdown_pct', max_drawdown)
     
     # Create individual risk models
-    volatility_risk = VolatilityBasedRisk(
+    volatility_risk = VolatilityRisk(
         target_volatility=target_volatility,
-        volatility_lookback=volatility_lookback,
+        lookback=volatility_lookback,
         max_position_size=max_position_size,
         max_leverage=max_leverage
     )
     
     stop_loss_risk = StopLossRisk(
-        stop_loss_pct=stop_loss_pct,
-        take_profit_pct=stop_loss_pct*2,  # Typically 2:1 reward:risk ratio
+        stop_loss=stop_loss_pct,
+        take_profit=stop_loss_pct*2,  # Typically 2:1 reward:risk ratio
         max_position_size=max_position_size,
         max_leverage=max_leverage
     )
@@ -512,7 +256,7 @@ def create_default_risk_model(config: Optional[Dict] = None) -> RiskModel:
     )
     
     # Create composite risk model
-    composite_risk = CompositeRiskModel(
+    composite_risk = CompositeRisk(
         risk_models=[volatility_risk, stop_loss_risk, drawdown_risk],
         max_position_size=max_position_size,
         max_leverage=max_leverage
@@ -548,22 +292,22 @@ if __name__ == "__main__":
         
         # Create risk models
         basic_risk = RiskModel(max_position_size=1.0)
-        vol_risk = VolatilityBasedRisk(target_volatility=0.15, volatility_lookback=20)
-        stop_loss_risk = StopLossRisk(stop_loss_pct=0.05, take_profit_pct=0.10)
+        vol_risk = VolatilityRisk(target_volatility=0.15, lookback=20)
+        stop_loss_risk = StopLossRisk(stop_loss=0.05, take_profit=0.10)
         drawdown_risk = DrawdownControlRisk(max_drawdown=0.15)
         
         # Size positions with each risk model
-        basic_positions = basic_risk.size_position(alpha_signals)
+        basic_positions = basic_risk.size_position(alpha_signals, data)
         vol_positions = vol_risk.size_position(alpha_signals, data)
         stop_loss_positions = stop_loss_risk.size_position(alpha_signals, data)
         drawdown_positions = drawdown_risk.size_position(alpha_signals, returns)
         
         # Create composite risk model
-        composite_risk = CompositeRiskModel(
+        composite_risk = CompositeRisk(
             risk_models=[vol_risk, stop_loss_risk, drawdown_risk],
             max_position_size=1.0
         )
-        composite_positions = composite_risk.size_position(alpha_signals, data, returns)
+        composite_positions = composite_risk.size_position(alpha_signals, data)
         
         # Create DataFrame with all positions
         positions_df = pd.DataFrame({

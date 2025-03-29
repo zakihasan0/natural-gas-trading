@@ -1,0 +1,39 @@
+checks:
+  api_connections:
+    details:
+      eia:
+        message: EIA API key not found in credentials
+        status: SKIP
+      noaa:
+        message: NOAA token not found in credentials
+        status: SKIP
+    status: PASS
+  component_imports:
+    details:
+      failed_imports:
+      - component: src.data_processing.data_pipeline
+        error: cannot import name 'fetch_natural_gas_prices' from 'src.data_ingestion.eia_fetcher'
+          (/Users/zakihasan/Desktop/natural-gas-trading/src/data_ingestion/eia_fetcher.py)
+      - component: src.live_trading.signal_generator
+        error: cannot import name 'fetch_natural_gas_prices' from 'src.data_ingestion.eia_fetcher'
+          (/Users/zakihasan/Desktop/natural-gas-trading/src/data_ingestion/eia_fetcher.py)
+    status: FAIL
+  data_availability:
+    details:
+      has_synthetic_data: false
+      message: Data files missing and no synthetic data available
+      missing_files:
+      - noaa_weather
+    status: FAIL
+  dependencies:
+    details:
+      missing_packages:
+      - pyyaml
+      - scikit-learn
+    status: FAIL
+  directory_structure:
+    details:
+      missing_directories: []
+    status: PASS
+overall_status: WARNING
+timestamp: '2025-03-29 12:06:47'

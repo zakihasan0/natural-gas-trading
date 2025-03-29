@@ -1,0 +1,50 @@
+# .cursorrules
+
+# ------------------------------------------------------------------
+# This file tells Cursor how to handle code generation and editing.
+# Adjust paths and rules to match your structure & conventions.
+# ------------------------------------------------------------------
+
+# Paths that Cursor should ignore (will not provide or update suggestions):
+ignorePaths:
+  - "**/data/**"
+  - "**/docs/**"
+  - "**/tests/integration/**"
+  - "**/.git/**"
+  - "**/env/**"
+  - "**/venv/**"
+  - "**/.venv/**"
+
+# File patterns Cursor should treat as binary or non-source:
+ignoreFilePatterns:
+  - "*.csv"
+  - "*.parquet"
+  - "*.pickle"
+  - "*.pdf"
+  - "*.png"
+  - "*.jpg"
+  - "*.jpeg"
+  - "*.gif"
+  - "*.zip"
+  - "*.tar.gz"
+  - "*.egg-info"
+  - "*.pyc"
+
+# Suggested style guidelines for generated Python code:
+pythonStyle:
+  # Insert docstrings for functions and classes automatically:
+  docstrings: true
+  # Enforce line length?
+  maxLineLength: 100
+
+# Banned imports or modules (if you don’t want the AI pulling them in):
+bannedImports:
+  - "sklearn.linear_model.SGDClassifier"  # Example
+  - "tkinter"                            # Just an example
+
+# Force certain architecture or usage patterns? 
+# Example: always encourage usage of vectorbt for backtesting:
+preferImports:
+  - "import vectorbt as vbt"
+
+# End of .cursorrules
